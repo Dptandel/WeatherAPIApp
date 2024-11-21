@@ -1,15 +1,22 @@
 package com.app.weatherapiapp
 
+import android.Manifest.permission.ACCESS_FINE_LOCATION
 import android.annotation.SuppressLint
+import android.content.pm.PackageManager
+import android.location.Geocoder
 import android.os.Bundle
 import android.util.Log
 import android.widget.SearchView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.app.weatherapiapp.databinding.ActivityMainBinding
 import com.app.weatherapiapp.models.WeatherApi
 import com.app.weatherapiapp.retrofit.RetrofitClient
+import com.google.android.gms.location.FusedLocationProviderClient
+import com.google.android.gms.location.LocationServices
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
@@ -23,13 +30,25 @@ import kotlin.math.roundToInt
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    private lateinit var fusedLocationClient: FusedLocationProviderClient
+
+    companion object {
+        private const val LOCATION_PERMISSION_REQUEST_CODE = 101
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        fetchWeatherData("Surat")
+        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+
+        if (checkLocationPermission()) {
+            fetchCurrentLocationWeather()
+        } else {
+            requestLocationPermission()
+        }
+
         searchCity()
     }
 
@@ -48,6 +67,37 @@ class MainActivity : AppCompatActivity() {
             }
 
         })
+    }
+
+    private fun checkLocationPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this, ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun requestLocationPermission() {
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(ACCESS_FINE_LOCATION),
+            LOCATION_PERMISSION_REQUEST_CODE
+        )
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun fetchCurrentLocationWeather() {
+        fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+            if (location != null) {
+                val cityName = getCityName(location.latitude, location.longitude)
+                if (cityName != null) {
+                    fetchWeatherData(cityName)
+                } else {
+                    Toast.makeText(this, "Unable to determine city name.", Toast.LENGTH_SHORT)
+                        .show()
+                }
+            } else {
+                Toast.makeText(this, "Unable to fetch location.", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun fetchWeatherData(cityName: String) {
@@ -70,9 +120,7 @@ class MainActivity : AppCompatActivity() {
                     val maxTemp = it.main.temp_max
                     val minTemp = it.main.temp_min
 
-                    // Log.d("TAG", "onResponse: $temp")
-
-                    binding.temp.text = "$temperature °C"
+                    binding.temp.text = "$temperature"
                     binding.weather.text = condition
                     binding.maxTemp.text = "Max : $maxTemp °C"
                     binding.minTemp.text = "Min : $minTemp °C"
@@ -140,5 +188,35 @@ class MainActivity : AppCompatActivity() {
     fun dayName(timestamp: Long): String {
         val sdf = SimpleDateFormat("EEEE", Locale.getDefault())
         return sdf.format(Date())
+    }
+
+    private fun getCityName(lat: Double, lon: Double): String? {
+        return try {
+            val geocoder = Geocoder(this, Locale.getDefault())
+            val addresses = geocoder.getFromLocation(lat, lon, 1)
+            if (addresses?.isNotEmpty() == true) {
+                addresses?.get(0)?.locality // City name
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == LOCATION_PERMISSION_REQUEST_CODE) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                fetchCurrentLocationWeather()
+            } else {
+                Toast.makeText(this, "Location permission denied.", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 }
